@@ -25,6 +25,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Service
 public class COServiceImpl implements COService {
@@ -50,43 +54,51 @@ public class COServiceImpl implements COService {
 
         List<COTriggers> coTriggersList = coTriggersRepository.findByTrgStatus("Pending");
         Map<String, Integer> notices = new HashMap<>();
-        for (COTriggers coTriggers : coTriggersList) {
-            Integer caseNumber = coTriggers.getCaseNumber();
+            ExecutorService executorService = Executors.newFixedThreadPool(10);
+            ExecutorCompletionService<Object> pool = new ExecutorCompletionService<>(executorService);
+        for (COTriggers coTrigger : coTriggersList) {
             try {
-
-                EDModule applicant = edModuleRepository.findByCaseNumber(coTriggers.getCaseNumber());
-                AppRegistration appEntity = appRegistrationRepository.findByCaseNumber(caseNumber);
-                String email = appEntity.getEmail();
-
-                File file = new File(applicant.getCaseNumber() + ".pdf");
-                generatePdf(applicant, file);
-
-
-                String subject = "Eligibility details";
-                String body = "";
-                String fileToAttach = "";
-                emailSender.sendMailWithAttachment(email, subject, body, fileToAttach);
-
-                byte[] fileData = new byte[1024];
-                FileInputStream fis = new FileInputStream(file);
-                fis.read(fileData);
-                coTriggers.setCoPDF(fileData);
-                coTriggers.setTrgStatus("Completed");
-                coTriggersRepository.save(coTriggers);
-
-                fis.close();
+                pool.submit(() -> {
+                    processTrigger(coTrigger);
+                    return null;
+                });
                 successCount++;
-
-            }catch (Exception e) {
+            } catch (Exception e) {
                 e.printStackTrace();
                 failedCount++;
             }
         }
 
+
         notices.put("Success Count", successCount);
         notices.put("Failed Count", failedCount);
         notices.put("Total Count", totalCount);
         return notices;
+    }
+
+    private void processTrigger(COTriggers coTriggers) throws IOException {
+        EDModule applicant = edModuleRepository.findByCaseNumber(coTriggers.getCaseNumber());
+        AppRegistration appEntity = appRegistrationRepository.findByCaseNumber(coTriggers.getCaseNumber());
+        String email = appEntity.getEmail();
+
+        File file = new File(applicant.getCaseNumber() + ".pdf");
+        generatePdf(applicant, file);
+
+
+        String subject = "Eligibility details";
+        String body = "";
+        String fileToAttach = "";
+        emailSender.sendMailWithAttachment(email, subject, body, fileToAttach);
+
+        byte[] fileData = new byte[1024];
+        FileInputStream fis = new FileInputStream(file);
+        fis.read(fileData);
+        coTriggers.setCoPDF(fileData);
+        coTriggers.setTrgStatus("Completed");
+        coTriggersRepository.save(coTriggers);
+
+        fis.close();
+
     }
 
 
